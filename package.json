@@ -32,7 +32,6 @@
     "@sparticuz/chromium": "^141.0.0",
     "@stellar/stellar-sdk": "^12.3.0",
     "axios": "^1.7.7",
-    "canvas": "^2.11.2",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "form-data": "^4.0.1",

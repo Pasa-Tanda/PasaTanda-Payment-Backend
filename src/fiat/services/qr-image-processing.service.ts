@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import sharp from 'sharp';
-import { createCanvas, loadImage, registerFont } from 'canvas';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import axios from 'axios';
@@ -26,11 +25,9 @@ export class QrImageProcessingService {
   private readonly tmpDir = path.join(process.cwd(), 'tmp', 'qr-tests');
   private readonly assetsDir = path.join(process.cwd(), 'assets');
   private readonly logoPath = path.join(this.assetsDir, 'images', 'TandaPaso_logo_QR.png');
-  private readonly fontPath = path.join(this.assetsDir, 'fonts', 'StackSansHeadline.ttf');
 
   constructor(private readonly configService: ConfigService) {
     this.ensureDirectories();
-    this.registerFonts();
   }
 
   private async ensureDirectories(): Promise<void> {
@@ -43,15 +40,13 @@ export class QrImageProcessingService {
     }
   }
 
-  private registerFonts(): void {
-    try {
-      // Register custom font if it exists
-      if (require('fs').existsSync(this.fontPath)) {
-        registerFont(this.fontPath, { family: 'StackSansHeadline' });
-      }
-    } catch (error) {
-      this.logger.warn('Could not register custom font, using default', error);
-    }
+  private escapeSvg(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
   }
 
   /**
@@ -140,53 +135,36 @@ export class QrImageProcessingService {
     groupName: string,
     amountBs: string,
   ): Promise<Buffer> {
-    // Create canvas 800x1000px
-    const canvas = createCanvas(800, 1000);
-    const ctx = canvas.getContext('2d');
+    const qrPng = await sharp(qrBuffer).png().toBuffer();
+    const qrDataUrl = `data:image/png;base64,${qrPng.toString('base64')}`;
+    const safeGroup = this.escapeSvg(groupName);
+    const safeAmount = this.escapeSvg(amountBs);
 
-    // Background color: black
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, 800, 1000);
+    const qrSize = 760;
+    const margin = 20;
 
-    // Load and draw QR at top (0, 0)
-    const qrImage = await loadImage(qrBuffer);
-    ctx.drawImage(qrImage, 0, 0, 800, 800);
+    const svg = `
+      <svg width="800" height="1000" viewBox="0 0 800 1000" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <style>
+            .title { font: 48px 'Helvetica Neue', Arial, sans-serif; font-weight: 700; fill: #000; }
+            .label { font: 32px 'Helvetica Neue', Arial, sans-serif; font-weight: 400; fill: #000; }
+            .value { font: 32px 'Helvetica Neue', Arial, sans-serif; font-weight: 700; fill: #000; }
+          </style>
+        </defs>
+        <rect width="800" height="1000" fill="#000" />
+        <rect x="${margin - 10}" y="${margin - 10}" width="${qrSize + 20}" height="${qrSize + 20}" fill="none" stroke="#FFF" stroke-width="10" />
+        <image href="${qrDataUrl}" x="${margin}" y="${margin}" width="${qrSize}" height="${qrSize}" preserveAspectRatio="xMidYMid meet" />
+        <rect x="0" y="800" width="800" height="200" fill="#FFF" />
+        <text x="400" y="860" text-anchor="middle" class="title">PasaTanda</text>
+        <text x="50" y="930" text-anchor="start" class="label">Grupo:</text>
+        <text x="350" y="930" text-anchor="end" class="label">Monto:</text>
+        <text x="50" y="970" text-anchor="start" class="value">${safeGroup}</text>
+        <text x="750" y="970" text-anchor="end" class="value">Bs. ${safeAmount}</text>
+      </svg>
+    `;
 
-    // Bottom section (800x200px) - white background
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(0, 800, 800, 200);
-
-    // Text styling
-    const fontFamily = require('fs').existsSync(this.fontPath)
-      ? 'StackSansHeadline'
-      : 'Arial';
-
-    // "PasaTanda" centered at ~850px
-    ctx.fillStyle = '#000000';
-    ctx.font = `bold 48px ${fontFamily}`;
-    ctx.textAlign = 'center';
-    ctx.fillText('PasaTanda', 400, 860);
-
-    // Left column: "Grupo:"
-    ctx.font = `32px ${fontFamily}`;
-    ctx.textAlign = 'left';
-    ctx.fillText('Grupo:', 50, 930);
-
-    // Right column: "Monto:"
-    ctx.textAlign = 'right';
-    ctx.fillText('Monto:', 350, 930);
-
-    // Left column: Group name
-    ctx.font = `bold 28px ${fontFamily}`;
-    ctx.textAlign = 'left';
-    ctx.fillText(groupName, 50, 970);
-
-    // Right column: Amount
-    ctx.textAlign = 'right';
-    ctx.fillText(`Bs. ${amountBs}`, 750, 970);
-
-    // Convert canvas to buffer
-    return canvas.toBuffer('image/png');
+    return sharp(Buffer.from(svg)).png().toBuffer();
   }
 
   /**
