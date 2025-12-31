@@ -46,13 +46,21 @@ export const configureApp = (app: INestApplication): void => {
   const swaggerConfig = new DocumentBuilder()
     .setTitle('BMS Payment Backend')
     .setDescription(
-      'Automation worker responsible for Ecofuturo bank interactions and x402 cryptocurrency payments on Stellar Network.',
+      'Backend de pagos para QR bancario, protocolo x402 en Stellar y contratos Soroban (Pasanaku/Blend). Incluye orquestación integrada y endpoints internos.',
     )
     .setVersion('1.0.0')
     .addTag('Fiat Automation')
     .addTag(
       'x402 Payments',
       'HTTP 402 Payment Required protocol for cryptocurrency payments on Stellar',
+    )
+    .addTag(
+      'Soroban Smart Contracts',
+      'Operaciones PasanakuGroup/Factory en Soroban (create_group, deposit_for, payout, sweep_yield)',
+    )
+    .addTag(
+      'Integrated Payments',
+      'Orquesta pagos X402 con registro on-chain y ciclo de payouts',
     )
     .addServer('http://localhost:3000', 'Local development')
     .addApiKey(

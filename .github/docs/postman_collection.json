@@ -1,0 +1,269 @@
+{
+  "info": {
+    "name": "TandaPaso Payment Backend",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Colección actualizada con todos los endpoints (X402, Fiat, Soroban, Integrated). Usa variables para baseUrl y headers."
+  },
+  "item": [
+    {
+      "name": "Root",
+      "item": [
+        {
+          "name": "GET /",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/", "host": ["{{baseUrl}}"], "path": [""] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "X402 Payments",
+      "item": [
+        {
+          "name": "GET /api/pay (descubrimiento)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/pay?orderId=ORDER-123&amountUsd=25.5&description=Suscripcion&resource=/product/123&fiatAmount=175&currency=BOB&symbol=Bs.&requiresManualConfirmation=true",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "pay"],
+              "query": [
+                {"key": "orderId", "value": "ORDER-123"},
+                {"key": "amountUsd", "value": "25.5"},
+                {"key": "description", "value": "Suscripcion"},
+                {"key": "resource", "value": "/product/123"},
+                {"key": "fiatAmount", "value": "175"},
+                {"key": "currency", "value": "BOB"},
+                {"key": "symbol", "value": "Bs."},
+                {"key": "requiresManualConfirmation", "value": "true"}
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /api/pay (crypto)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {"key": "X-PAYMENT", "value": "{{xPaymentCrypto}}"}
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/pay?orderId=ORDER-123&amountUsd=25.5",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "pay"],
+              "query": [
+                {"key": "orderId", "value": "ORDER-123"},
+                {"key": "amountUsd", "value": "25.5"}
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 crypto settlement",
+              "originalRequest": {"method": "GET", "url": ""},
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"type\": \"crypto\",\n  \"transaction\": \"afe1c9...\",\n  \"network\": \"stellar-testnet\",\n  \"payer\": \"GPAYER...\",\n  \"errorReason\": null\n}"
+            }
+          ]
+        },
+        {
+          "name": "GET /api/pay (fiat)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {"key": "X-PAYMENT", "value": "{{xPaymentFiat}}"}
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/pay?orderId=ORDER-123&amountUsd=25.5&fiatAmount=175&currency=BOB",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "pay"],
+              "query": [
+                {"key": "orderId", "value": "ORDER-123"},
+                {"key": "amountUsd", "value": "25.5"},
+                {"key": "fiatAmount", "value": "175"},
+                {"key": "currency", "value": "BOB"}
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /api/health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {"raw": "{{baseUrl}}/api/health", "host": ["{{baseUrl}}"], "path": ["api", "health"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Fiat Automation",
+      "item": [
+        {
+          "name": "POST /v1/fiat/generate-qr",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"ORDER-123456\",\n  \"amount\": 150.75,\n  \"details\": \"BM-QR-INV-1001\"\n}"
+            },
+            "url": {"raw": "{{baseUrl}}/v1/fiat/generate-qr", "host": ["{{baseUrl}}"], "path": ["v1", "fiat", "generate-qr"]}
+          }
+        },
+        {
+          "name": "POST /v1/fiat/verify-payment",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"ORDER-123456\",\n  \"details\": \"BM-QR-INV-1001\"\n}"
+            },
+            "url": {"raw": "{{baseUrl}}/v1/fiat/verify-payment", "host": ["{{baseUrl}}"], "path": ["v1", "fiat", "verify-payment"]}
+          }
+        },
+        {
+          "name": "POST /v1/fiat/set-2fa",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "x-internal-api-key", "value": "{{internalApiKey}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"123456\"\n}"
+            },
+            "url": {"raw": "{{baseUrl}}/v1/fiat/set-2fa", "host": ["{{baseUrl}}"], "path": ["v1", "fiat", "set-2fa"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Soroban Smart Contracts",
+      "item": [
+        {
+          "name": "GET /api/soroban/health",
+          "request": {"method": "GET", "header": [], "url": {"raw": "{{baseUrl}}/api/soroban/health", "host": ["{{baseUrl}}"], "path": ["api", "soroban", "health"]}}
+        },
+        {
+          "name": "POST /api/soroban/groups",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"members\": [\"GAAA...\", \"GBBB...\"],\n  \"amountPerRound\": \"10000000\",\n  \"frequencyDays\": 7,\n  \"enableYield\": true,\n  \"yieldShareBps\": 7000\n}"
+            },
+            "url": {"raw": "{{baseUrl}}/api/soroban/groups", "host": ["{{baseUrl}}"], "path": ["api", "soroban", "groups"]}
+          }
+        },
+        {
+          "name": "POST /api/soroban/groups/:groupAddress/deposit",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"beneficiary\": \"GAAA...\",\n  \"amount\": \"10000000\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/soroban/groups/{{groupAddress}}/deposit",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "soroban", "groups", "{{groupAddress}}", "deposit"]
+            }
+          }
+        },
+        {
+          "name": "POST /api/soroban/groups/:groupAddress/payout",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"winner\": \"GAAA...\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/soroban/groups/{{groupAddress}}/payout", "host": ["{{baseUrl}}"], "path": ["api", "soroban", "groups", "{{groupAddress}}", "payout"]}
+          }
+        },
+        {
+          "name": "POST /api/soroban/groups/:groupAddress/sweep-yield",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"treasuryAddress\": \"GTREASURY...\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/soroban/groups/{{groupAddress}}/sweep-yield", "host": ["{{baseUrl}}"], "path": ["api", "soroban", "groups", "{{groupAddress}}", "sweep-yield"]}
+          }
+        },
+        {
+          "name": "GET /api/soroban/groups/:groupAddress/config",
+          "request": {"method": "GET", "header": [], "url": {"raw": "{{baseUrl}}/api/soroban/groups/{{groupAddress}}/config", "host": ["{{baseUrl}}"], "path": ["api", "soroban", "groups", "{{groupAddress}}", "config"]}}
+        },
+        {
+          "name": "GET /api/soroban/groups/:groupAddress/members",
+          "request": {"method": "GET", "header": [], "url": {"raw": "{{baseUrl}}/api/soroban/groups/{{groupAddress}}/members", "host": ["{{baseUrl}}"], "path": ["api", "soroban", "groups", "{{groupAddress}}", "members"]}}
+        },
+        {
+          "name": "GET /api/soroban/groups/:groupAddress/round",
+          "request": {"method": "GET", "header": [], "url": {"raw": "{{baseUrl}}/api/soroban/groups/{{groupAddress}}/round", "host": ["{{baseUrl}}"], "path": ["api", "soroban", "groups", "{{groupAddress}}", "round"]}}
+        },
+        {
+          "name": "GET /api/soroban/groups/:groupAddress/estimated-yield",
+          "request": {"method": "GET", "header": [], "url": {"raw": "{{baseUrl}}/api/soroban/groups/{{groupAddress}}/estimated-yield", "host": ["{{baseUrl}}"], "path": ["api", "soroban", "groups", "{{groupAddress}}", "estimated-yield"]}}
+        }
+      ]
+    },
+    {
+      "name": "Integrated Payments",
+      "item": [
+        {
+          "name": "POST /api/integrated/payments/:jobId/register",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"groupAddress\": \"{{groupAddress}}\",\n  \"memberAddress\": \"{{memberAddress}}\"\n}"
+            },
+            "url": {"raw": "{{baseUrl}}/api/integrated/payments/{{jobId}}/register", "host": ["{{baseUrl}}"], "path": ["api", "integrated", "payments", "{{jobId}}", "register"]}
+          }
+        },
+        {
+          "name": "POST /api/integrated/groups/:groupAddress/payout",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"winnerAddress\": \"{{winnerAddress}}\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/integrated/groups/{{groupAddress}}/payout", "host": ["{{baseUrl}}"], "path": ["api", "integrated", "groups", "{{groupAddress}}", "payout"]}
+          }
+        },
+        {
+          "name": "POST /api/integrated/groups/:groupAddress/sweep-yield",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"treasuryAddress\": \"{{treasuryAddress}}\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/integrated/groups/{{groupAddress}}/sweep-yield", "host": ["{{baseUrl}}"], "path": ["api", "integrated", "groups", "{{groupAddress}}", "sweep-yield"]}
+          }
+        },
+        {
+          "name": "GET /api/integrated/groups/:groupAddress/status",
+          "request": {"method": "GET", "header": [], "url": {"raw": "{{baseUrl}}/api/integrated/groups/{{groupAddress}}/status", "host": ["{{baseUrl}}"], "path": ["api", "integrated", "groups", "{{groupAddress}}", "status"]}}
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {"key": "baseUrl", "value": "http://localhost:3000"},
+    {"key": "internalApiKey", "value": "CHANGE_ME"},
+    {"key": "xPaymentCrypto", "value": "BASE64_XPAYMENT_CRYPTO"},
+    {"key": "xPaymentFiat", "value": "BASE64_XPAYMENT_FIAT"},
+    {"key": "jobId", "value": "x402_..."},
+    {"key": "groupAddress", "value": "C..."},
+    {"key": "memberAddress", "value": "G..."},
+    {"key": "winnerAddress", "value": "G..."},
+    {"key": "treasuryAddress", "value": "G..."}
+  ]
+}

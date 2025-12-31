@@ -154,6 +154,12 @@ USDC_CONTRACT_ADDRESS=CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA
 
 # BLEND POOL (Obtener de https://testnet.blend.capital)
 BLEND_POOL_ADDRESS=CXXXXX...  # Dirección del pool
+
+# FX (Binance P2P opcional)
+BINANCE_P2P_API_KEY=xxxx
+BINANCE_P2P_API_SECRET=xxxx
+BINANCE_P2P_SYMBOL=USDTBOB  # Par de referencia para FX (USDT→BOB)
+BINANCE_P2P_FALLBACK_RATE=9.82  # Se usa si el API no responde
 ```
 
 ### Obtener Blend Pool Address
