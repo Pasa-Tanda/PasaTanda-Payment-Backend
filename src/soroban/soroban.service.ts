@@ -3,11 +3,10 @@ import { ConfigService } from '@nestjs/config';
 import {
   Keypair,
   Contract,
-  SorobanRpc,
+  rpc,
   TransactionBuilder,
   Networks,
   BASE_FEE,
-  Operation,
   Address,
   xdr,
   scValToNative,
@@ -29,23 +28,62 @@ import {
 export class SorobanService implements OnModuleInit {
   private readonly logger = new Logger(SorobanService.name);
   
-  private server!: SorobanRpc.Server;
+  private server!: rpc.Server;
   private adminKeypair!: Keypair;
   private adminAddress!: string;
   
-  // Contract addresses from DEPLOYED_CONTRACTS.md
-  private readonly FACTORY_ADDRESS = 'CCYLAWPJM6OVZ222HLPZBE5VLP5HYS43575LI4SCYMGC35JFL2DQUSGD';
-  private readonly GROUP_WASM_HASH = '091f6b66a1bf7192bff0ec84e32c5f2f32c4c77ef1bd742a6d3b8d2a67804ea6';
-  
+  // Contract addresses from Environment
+  private get FACTORY_ADDRESS(): string {
+    return this.configService.getOrThrow<string>('PASANAKU_FACTORY_ADDRESS');
+  }
+
   // USDC on Stellar Testnet
-  private readonly USDC_ADDRESS = 'CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA';
-  
-  // Blend Pool address (to be configured)
-  private readonly BLEND_POOL_ADDRESS = process.env.BLEND_POOL_ADDRESS || '';
+  private get USDC_ADDRESS(): string {
+    return this.configService.getOrThrow<string>('USDC_CONTRACT_ADDRESS');
+  }
+
+  // Blend Pool address
+  private get BLEND_POOL_ADDRESS(): string {
+     return this.configService.get<string>('BLEND_POOL_ADDRESS') || '';
+  }
   
   private isConfigured = false;
 
   constructor(private readonly configService: ConfigService) {}
+
+  private scMap(entries: xdr.ScMapEntry[]): xdr.ScVal {
+    // Soroban host requires ScMap entries sorted by key for conversion.
+    // IMPORTANT: For symbols, sorting by full XDR bytes can be wrong because XDR encodes
+    // the length prefix; Soroban expects lexicographic order by the host value.
+    const sorted = [...entries].sort((a, b) => {
+      const keyA = a.key();
+      const keyB = b.key();
+      
+      // First compare by ScVal discriminant (type)
+      const switchA = keyA.switch().value;
+      const switchB = keyB.switch().value;
+      
+      if (switchA !== switchB) {
+        return switchA - switchB;
+      }
+
+      // If same type, prefer host-native ordering when possible (covers symbol keys)
+      try {
+        const nativeA = scValToNative(keyA);
+        const nativeB = scValToNative(keyB);
+
+        if (typeof nativeA === 'string' && typeof nativeB === 'string') {
+          return Buffer.compare(Buffer.from(nativeA, 'utf8'), Buffer.from(nativeB, 'utf8'));
+        }
+      } catch {
+        // Fall back to XDR compare below
+      }
+
+      // Fallback: compare XDR bytes lexicographically
+      return Buffer.compare(keyA.toXDR(), keyB.toXDR());
+    });
+    return xdr.ScVal.scvMap(sorted);
+  }
 
   async onModuleInit(): Promise<void> {
     await this.initialize();
@@ -58,7 +96,7 @@ export class SorobanService implements OnModuleInit {
     const rpcUrl = this.configService.get<string>('SOROBAN_RPC_URL') || 
                    'https://soroban-testnet.stellar.org';
     
-    this.server = new SorobanRpc.Server(rpcUrl, {
+    this.server = new rpc.Server(rpcUrl, {
       allowHttp: rpcUrl.startsWith('http://'),
     });
 
@@ -133,6 +171,18 @@ export class SorobanService implements OnModuleInit {
       return { success: false, error: 'Soroban service not configured' };
     }
 
+    // Validation: Pasanaku contracts usually require at least 2 members
+    if (members.length < 2) {
+      return {
+        success: false,
+        error: 'Validation Error: A Pasanaku group requires at least 2 members.',
+      };
+    }
+
+    if (frequencyDays < 1) {
+      return { success: false, error: 'Validation Error: Frequency must be at least 1 day.' };
+    }
+
     try {
       const factoryContract = new Contract(this.FACTORY_ADDRESS);
       
@@ -140,7 +190,7 @@ export class SorobanService implements OnModuleInit {
       const salt = Buffer.from(crypto.getRandomValues(new Uint8Array(32)));
       
       // Build CreateGroupParams struct
-      const params = xdr.ScVal.scvMap([
+      const entries = [
         new xdr.ScMapEntry({
           key: nativeToScVal('admin', { type: 'symbol' }),
           val: new Address(this.adminAddress).toScVal(),
@@ -159,7 +209,10 @@ export class SorobanService implements OnModuleInit {
         }),
         new xdr.ScMapEntry({
           key: nativeToScVal('members', { type: 'symbol' }),
-          val: nativeToScVal(members.map(addr => new Address(addr)), { type: 'vec' }),
+          val: nativeToScVal(
+            members.map((addr) => new Address(addr)),
+            { type: 'vec' },
+          ),
         }),
         new xdr.ScMapEntry({
           key: nativeToScVal('yield_enabled', { type: 'symbol' }),
@@ -173,7 +226,12 @@ export class SorobanService implements OnModuleInit {
           key: nativeToScVal('blend_pool_address', { type: 'symbol' }),
           val: new Address(this.BLEND_POOL_ADDRESS).toScVal(),
         }),
-      ]);
+      ];
+      const params = this.scMap(entries);
+      // Debug: log sorted keys
+      this.logger.debug(`CreateGroup params keys (sorted): ${
+        entries.map(e => scValToNative(e.key())).sort().join(', ')
+      }`);
 
       // Load account
       const sourceAccount = await this.server.getAccount(this.adminAddress);
@@ -194,14 +252,39 @@ export class SorobanService implements OnModuleInit {
         .build();
 
       // Simulate first
-      const simulationResponse = await this.server.simulateTransaction(transaction);
+      this.logger.debug(`Simulating create_group transaction...`);
       
-      if (SorobanRpc.Api.isSimulationError(simulationResponse)) {
+      let simulationResponse;
+      try {
+        simulationResponse = await this.server.simulateTransaction(transaction);
+        this.logger.debug(`Simulation response: ${JSON.stringify(simulationResponse, null, 2)}`);
+      } catch (simError) {
+         this.logger.error('SDK Simulation failed, trying raw fetch to debug...');
+         // Fallback to raw fetch to inspect response usually hidden by SDK error
+         const rpcUrl = this.configService.get<string>('SOROBAN_RPC_URL') || 'https://soroban-testnet.stellar.org';
+         const rawResponse = await fetch(rpcUrl, {
+           method: 'POST',
+           headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({
+             jsonrpc: '2.0',
+             id: 'debug-sim',
+             method: 'simulateTransaction',
+             params: {
+               transaction: transaction.toXDR(),
+             }
+           })
+         });
+         const rawJson = await rawResponse.json();
+         this.logger.error(`Raw Simulation Result: ${JSON.stringify(rawJson, null, 2)}`);
+         throw simError;
+      }
+      
+      if (rpc.Api.isSimulationError(simulationResponse)) {
         throw new Error(`Simulation failed: ${simulationResponse.error}`);
       }
 
       // Prepare and sign
-      const preparedTx = SorobanRpc.assembleTransaction(
+      const preparedTx = rpc.assembleTransaction(
         transaction,
         simulationResponse,
       ).build();
@@ -215,12 +298,12 @@ export class SorobanService implements OnModuleInit {
         // Wait for confirmation
         let getResponse = await this.server.getTransaction(sendResponse.hash);
         
-        while (getResponse.status === SorobanRpc.Api.GetTransactionStatus.NOT_FOUND) {
+        while (getResponse.status === rpc.Api.GetTransactionStatus.NOT_FOUND) {
           await new Promise(resolve => setTimeout(resolve, 1000));
           getResponse = await this.server.getTransaction(sendResponse.hash);
         }
 
-        if (getResponse.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+        if (getResponse.status === rpc.Api.GetTransactionStatus.SUCCESS) {
           // Extract group address from result
           const result = getResponse.returnValue;
           const groupAddress = result ? Address.fromScVal(result).toString() : undefined;
@@ -292,12 +375,12 @@ export class SorobanService implements OnModuleInit {
       // Simulate
       const simulationResponse = await this.server.simulateTransaction(transaction);
       
-      if (SorobanRpc.Api.isSimulationError(simulationResponse)) {
+      if (rpc.Api.isSimulationError(simulationResponse)) {
         throw new Error(`Simulation failed: ${simulationResponse.error}`);
       }
 
       // Prepare and sign
-      const preparedTx = SorobanRpc.assembleTransaction(
+      const preparedTx = rpc.assembleTransaction(
         transaction,
         simulationResponse,
       ).build();
@@ -311,12 +394,12 @@ export class SorobanService implements OnModuleInit {
         // Wait for confirmation
         let getResponse = await this.server.getTransaction(sendResponse.hash);
         
-        while (getResponse.status === SorobanRpc.Api.GetTransactionStatus.NOT_FOUND) {
+        while (getResponse.status === rpc.Api.GetTransactionStatus.NOT_FOUND) {
           await new Promise(resolve => setTimeout(resolve, 1000));
           getResponse = await this.server.getTransaction(sendResponse.hash);
         }
 
-        if (getResponse.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+        if (getResponse.status === rpc.Api.GetTransactionStatus.SUCCESS) {
           this.logger.log(
             `deposit_for successful: ${sendResponse.hash} | Beneficiary: ${beneficiary} | Amount: ${amount}`,
           );
@@ -384,12 +467,12 @@ export class SorobanService implements OnModuleInit {
       // Simulate
       const simulationResponse = await this.server.simulateTransaction(transaction);
       
-      if (SorobanRpc.Api.isSimulationError(simulationResponse)) {
+      if (rpc.Api.isSimulationError(simulationResponse)) {
         throw new Error(`Simulation failed: ${simulationResponse.error}`);
       }
 
       // Prepare and sign
-      const preparedTx = SorobanRpc.assembleTransaction(
+      const preparedTx = rpc.assembleTransaction(
         transaction,
         simulationResponse,
       ).build();
@@ -403,12 +486,12 @@ export class SorobanService implements OnModuleInit {
         // Wait for confirmation
         let getResponse = await this.server.getTransaction(sendResponse.hash);
         
-        while (getResponse.status === SorobanRpc.Api.GetTransactionStatus.NOT_FOUND) {
+        while (getResponse.status === rpc.Api.GetTransactionStatus.NOT_FOUND) {
           await new Promise(resolve => setTimeout(resolve, 1000));
           getResponse = await this.server.getTransaction(sendResponse.hash);
         }
 
-        if (getResponse.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+        if (getResponse.status === rpc.Api.GetTransactionStatus.SUCCESS) {
           this.logger.log(
             `payout successful: ${sendResponse.hash} | Winner: ${winner}`,
           );
@@ -478,12 +561,12 @@ export class SorobanService implements OnModuleInit {
       // Simulate
       const simulationResponse = await this.server.simulateTransaction(transaction);
       
-      if (SorobanRpc.Api.isSimulationError(simulationResponse)) {
+      if (rpc.Api.isSimulationError(simulationResponse)) {
         throw new Error(`Simulation failed: ${simulationResponse.error}`);
       }
 
       // Prepare and sign
-      const preparedTx = SorobanRpc.assembleTransaction(
+      const preparedTx = rpc.assembleTransaction(
         transaction,
         simulationResponse,
       ).build();
@@ -497,12 +580,12 @@ export class SorobanService implements OnModuleInit {
         // Wait for confirmation
         let getResponse = await this.server.getTransaction(sendResponse.hash);
         
-        while (getResponse.status === SorobanRpc.Api.GetTransactionStatus.NOT_FOUND) {
+        while (getResponse.status === rpc.Api.GetTransactionStatus.NOT_FOUND) {
           await new Promise(resolve => setTimeout(resolve, 1000));
           getResponse = await this.server.getTransaction(sendResponse.hash);
         }
 
-        if (getResponse.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+        if (getResponse.status === rpc.Api.GetTransactionStatus.SUCCESS) {
           this.logger.log(
             `sweep_yield successful: ${sendResponse.hash} | Treasury: ${treasury}`,
           );
@@ -549,7 +632,7 @@ export class SorobanService implements OnModuleInit {
 
       const simulationResponse = await this.server.simulateTransaction(transaction);
       
-      if (SorobanRpc.Api.isSimulationError(simulationResponse)) {
+      if (rpc.Api.isSimulationError(simulationResponse)) {
         throw new Error(`Simulation failed: ${simulationResponse.error}`);
       }
 
@@ -586,7 +669,7 @@ export class SorobanService implements OnModuleInit {
 
       const simulationResponse = await this.server.simulateTransaction(transaction);
       
-      if (SorobanRpc.Api.isSimulationError(simulationResponse)) {
+      if (rpc.Api.isSimulationError(simulationResponse)) {
         throw new Error(`Simulation failed: ${simulationResponse.error}`);
       }
 
@@ -623,7 +706,7 @@ export class SorobanService implements OnModuleInit {
 
       const simulationResponse = await this.server.simulateTransaction(transaction);
       
-      if (SorobanRpc.Api.isSimulationError(simulationResponse)) {
+      if (rpc.Api.isSimulationError(simulationResponse)) {
         throw new Error(`Simulation failed: ${simulationResponse.error}`);
       }
 
@@ -660,7 +743,7 @@ export class SorobanService implements OnModuleInit {
 
       const simulationResponse = await this.server.simulateTransaction(transaction);
       
-      if (SorobanRpc.Api.isSimulationError(simulationResponse)) {
+      if (rpc.Api.isSimulationError(simulationResponse)) {
         throw new Error(`Simulation failed: ${simulationResponse.error}`);
       }
 
